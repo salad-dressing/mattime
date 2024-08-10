@@ -1,4 +1,5 @@
-mattime: progress-logging utility for martial art enthusiasts.
+# mattime
+### mattime: progress-logging utility for martial art enthusiasts.
 Usage: mattime [OPTION] ...
 
 Options:
