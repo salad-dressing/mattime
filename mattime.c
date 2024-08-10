@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <time.h>
 #include <sqlite3.h>
+#include <math.h>
 
 #define MAX_LOG_ENTRIES 20
 #define ENTRIES_TO_SHOW 10
@@ -34,6 +35,8 @@ int main(int argc, char* argv[]) {
 
     if (argc == 1) {
         info();
+        sqlite3_close(logs);
+        return 0;
     }
 
     initialiseDatabase(logs);
@@ -63,6 +66,7 @@ int main(int argc, char* argv[]) {
         reset(argc, argv, logs);
     }
     else {
+        fprintf(stdout, "Option not recognised.\n");
         info();
     }
 
@@ -157,6 +161,8 @@ int date() {
 }
 
 int initialiseDatabase(sqlite3* logs) {
+    // Ensures a table is created
+    
     char* createTableCommand = "CREATE TABLE IF NOT EXISTS Sessions(TotalHours FLOAT, HoursAdded FLOAT, Date TINYTEXT, Time TINYTEXT);";
     char* errorMessage;
     if (sqlite3_exec(logs, createTableCommand, 0, 0, &errorMessage) != SQLITE_OK) {
@@ -205,7 +211,15 @@ int add(int argc, char* argv[], sqlite3* logs) {
                 return 1;
             }
 
-            // Maintain a maximum number of log entries
+            // easter eggs
+            if (fmodf(previousTotalHours, 100) > fmodf(newTotalHours, 100)) {
+                fprintf(stdout, "\nCongratulations!! You passed a multiple of 100!!\n");
+            }
+            else if (fmodf(previousTotalHours, 50) > fmodf(newTotalHours, 50)) {
+                fprintf(stdout, "\nCongratulations! You passed a multiple of 50!\n");
+            }
+
+            // Maintain max. number of log entries
             int numberOfRows = 0;
             char* errorMessage2; char* errorMessage3;
             char* countRowsCommand = "SELECT COUNT(*) FROM Sessions;";

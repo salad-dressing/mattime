@@ -1,5 +1,5 @@
 build:
-	gcc mattime.c -g -l sqlite3 -o mattime
+	gcc mattime.c -g -l sqlite3 -lm -o mattime
 
 run:
 	./mattime
