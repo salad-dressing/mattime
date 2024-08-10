@@ -1,5 +1,8 @@
 {
     "editor.fontSize": 12,
     "editor.accessibilityPageSize": 101,
-    "window.zoomLevel": 2.5
+    "window.zoomLevel": 2.5,
+    "files.associations": {
+        "chrono": "c"
+    }
 }

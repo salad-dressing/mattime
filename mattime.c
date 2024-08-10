@@ -112,7 +112,7 @@ static int stringCallback(void *data, int argc, char **argv, char **azColName) {
         strcat(returnString, strdup(argv[3]));
         strcat(returnString, " |");
         
-        fprintf(stdout, "%s\n", returnString);
+        fprintf(stdout, "| %-14s| %-14s| %-11s| %-6s|\n", argv[0],argv[1],argv[2],argv[3]);
     }
     
 
@@ -289,7 +289,7 @@ int show(int argc, char* argv[], sqlite3* logs) {
                 "SELECT * FROM Sessions WHERE ROWID > ((SELECT MAX(ROWID) FROM Sessions) - %d);", ENTRIES_TO_SHOW);
 
         fprintf(stdout, "Recently logged entries:\n(Note: when the total hours is force-set, the added hours is listed as 0.)\n\n");
-        fprintf(stdout, "| Total Hrs | Added Hrs |    Date    | Time  |\n");
+        fprintf(stdout, "| Total Hrs     | Added Hrs     | Date       | Time  |\n");
         sqlite3_exec(logs, printEntriesCommand, stringCallback, 0, 0);
         fprintf(stdout, "\n");
     }
@@ -383,7 +383,7 @@ int undo(int argc, char* argv[], sqlite3* logs) {
         char* errorMessage1; char* errorMessage2; int returnCode1; int returnCode2;
         
         fprintf(stdout, "Confirm action: remove latest entry:\n\n");
-        fprintf(stdout, "| Total Hrs | Added Hrs |    Date    | Time  |\n");
+        fprintf(stdout, "| Total Hrs     | Added Hrs     | Date       | Time  |\n");
         returnCode1 = sqlite3_exec(logs, showLatestEntryCommand, stringCallback, 0, &errorMessage1);
         if (returnCode1 != SQLITE_OK) {
             fprintf(stderr, "Requesting latest entry failed!\nSQL error: %s\n", errorMessage1);
