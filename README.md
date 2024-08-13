@@ -1,5 +1,15 @@
 # mattime 🥋
-### mattime: progress-logging utility for martial art enthusiasts.
+mattime: progress-logging utility for martial art enthusiasts.
+
+### Installation
+Clone the repository, and run the `install.sh` script within it as superuser.
+```
+git clone https://github.com/salad-dressing/mattime.git
+cd mattime
+sudo ./install.sh
+```
+
+### Usage
 Usage: `mattime [OPTION] ...`
 
 Options:
