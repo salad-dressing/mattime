@@ -1,0 +1,10 @@
+# Todo files
+todo.txt
+
+# Executables
+*.exe
+*.out
+*.app
+*.i*86
+*.x86_64
+*.hex

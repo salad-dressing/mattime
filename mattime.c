@@ -5,21 +5,22 @@
 #include <sqlite3.h>
 #include <math.h>
 
-#define MAX_LOG_ENTRIES 20
-#define ENTRIES_TO_SHOW 10
+#define MAX_LOG_ENTRIES                                   20
+#define ENTRIES_TO_SHOW                                   10
+#define LOGS_DIRECTORY        ".local/share/mattime/logs.db"
 
-int                                       info();
-int                                       help();
-int                                       date();
+int                                                  info();
+int                                                  help();
+int                                                  date();
 
-int            initialiseDatabase(sqlite3* logs);
+int                       initialiseDatabase(sqlite3* logs);
 
-int   add(int argc, char* argv[], sqlite3* logs);
-int total(int argc, char* argv[], sqlite3* logs);
-int  show(int argc, char* argv[], sqlite3* logs);
-int force(int argc, char* argv[], sqlite3* logs);
-int  undo(int argc, char* argv[], sqlite3* logs);
-int reset(int argc, char* argv[], sqlite3* logs);
+int              add(int argc, char* argv[], sqlite3* logs);
+int            total(int argc, char* argv[], sqlite3* logs);
+int             show(int argc, char* argv[], sqlite3* logs);
+int            force(int argc, char* argv[], sqlite3* logs);
+int             undo(int argc, char* argv[], sqlite3* logs);
+int            reset(int argc, char* argv[], sqlite3* logs);
 
 
 
@@ -27,7 +28,11 @@ int main(int argc, char* argv[]) {
 
     sqlite3* logs;
 
-    if (sqlite3_open("logs.db", &logs) != SQLITE_OK) {
+    char* home = getenv("HOME");
+    char path_to_logs[1024];
+    snprintf(path_to_logs, sizeof(path_to_logs), "%s/%s", home, LOGS_DIRECTORY);
+
+    if (sqlite3_open(path_to_logs, &logs) != SQLITE_OK) {
         fprintf(stderr, "Cannot open database: %s\n", sqlite3_errmsg(logs));
         sqlite3_close(logs);
         return 1;
@@ -73,6 +78,8 @@ int main(int argc, char* argv[]) {
     sqlite3_close(logs);
     return 0;
 }
+
+
 
 static int floatCallback(void* data, int argc, char** argv, char** azColName) {
     if (argc == 1 && argv[0]) {
