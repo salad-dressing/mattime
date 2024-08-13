@@ -2,6 +2,7 @@
 todo.txt
 
 # Executables
+*.o
 *.exe
 *.out
 *.app
