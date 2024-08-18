@@ -130,13 +130,13 @@ static int stringCallback(void *data, int argc, char **argv, char **azColName) {
 int info() {
     // Prints basic information
 
-    fprintf(stdout, "mattime: progress-logging utility for martial art enthusiasts.\n\
+    fprintf(stdout, "mattime: progress-logging utility.\n\
 Try 'mattime help' for more information.\n");
     return 0;
 }
 
 int help() {
-    fprintf(stdout, "mattime: progress-logging utility for martial art enthusiasts.\n\
+    fprintf(stdout, "mattime: progress-logging utility.\n\
 Usage: mattime [OPTION] ...\n\n\
 Options:\n\
   -h, help              Displays the help page\n\
