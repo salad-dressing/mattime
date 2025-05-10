@@ -1,6 +1,6 @@
 # Custom
 todo.txt
-*.vscode
+.vscode
 
 # Compiled source #
 ###################

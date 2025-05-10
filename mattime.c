@@ -8,6 +8,8 @@
 #define MAX_LOG_ENTRIES                                   20
 #define ENTRIES_TO_SHOW                                   10
 #define LOGS_DIRECTORY        ".local/share/mattime/logs.db"
+#define PATH_TO_LOGS_BUFSIZE                            1024
+#define DATETIME_BUFSIZE                                1024
 
 int                                                  info();
 int                                                  help();
@@ -24,66 +26,9 @@ int            reset(int argc, char* argv[], sqlite3* logs);
 
 
 
-int main(int argc, char* argv[]) {
-
-    sqlite3* logs;
-
-    char* home = getenv("HOME");
-    char path_to_logs[1024];
-    snprintf(path_to_logs, sizeof(path_to_logs), "%s/%s", home, LOGS_DIRECTORY);
-
-    if (sqlite3_open(path_to_logs, &logs) != SQLITE_OK) {
-        fprintf(stderr, "Cannot open database: %s\n", sqlite3_errmsg(logs));
-        sqlite3_close(logs);
-        return 1;
-    }
-
-    if (argc == 1) {
-        info();
-        sqlite3_close(logs);
-        return 0;
-    }
-
-    initialiseDatabase(logs);
-
-    if (strcmp(argv[1], "help") == 0 || strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0) {
-        help();
-    }
-    else if (strcmp(argv[1], "date") == 0  || strcmp(argv[1], "-d") == 0) {
-        date();
-    }
-    else if (strcmp(argv[1], "add") == 0 || strcmp(argv[1], "-a") == 0) {
-        add(argc, argv, logs);
-    }
-    else if (strcmp(argv[1], "total") == 0 || strcmp(argv[1], "-t") == 0) {
-        total(argc, argv, logs);
-    }
-    else if (strcmp(argv[1], "show") == 0 || strcmp(argv[1], "-s") == 0) {
-        show(argc, argv, logs);
-    }
-    else if (strcmp(argv[1], "force") == 0 || strcmp(argv[1], "-f") == 0) {
-        force(argc, argv, logs);
-    }
-    else if (strcmp(argv[1], "undo") == 0 || strcmp(argv[1], "-u") == 0) {
-        undo(argc, argv, logs);
-    }
-    else if (strcmp(argv[1], "reset") == 0 || strcmp(argv[1], "-r") == 0) {
-        reset(argc, argv, logs);
-    }
-    else {
-        fprintf(stdout, "Option not recognised.\n");
-        info();
-    }
-
-    sqlite3_close(logs);
-    return 0;
-}
-
-
-
 static int floatCallback(void* data, int argc, char** argv, char** azColName) {
     if (argc == 1 && argv[0]) {
-        *(float*)data = atof(argv[0]); // Convert the result to float and store it in data
+        *(float*)data = strtof(argv[0], NULL); // Convert the result to float and store it in data
     }
     return 0;
 }
@@ -126,16 +71,37 @@ static int stringCallback(void *data, int argc, char **argv, char **azColName) {
     return 0;
 }
 
+int initialiseDatabase(sqlite3* logs) {
+    
+    // Ensures a table is created
+    // Returns 0 for success, 1 otherwise
+    
+    char* createTableCommand = "CREATE TABLE IF NOT EXISTS Sessions(TotalHours FLOAT, HoursAdded FLOAT, Date TINYTEXT, Time TINYTEXT);";
+    char* errorMessage;
+
+    if (sqlite3_exec(logs, createTableCommand, 0, 0, &errorMessage) != SQLITE_OK) {
+        fprintf(stderr, "Creating table failed!\nSQL error: %s\n", errorMessage);
+        return 1;
+    }
+
+    return 0;
+}
+
 
 int info() {
-    // Prints basic information
+
+    // Print basic information
 
     fprintf(stdout, "mattime: progress-logging utility.\n\
 Try 'mattime help' for more information.\n");
+
     return 0;
 }
 
 int help() {
+
+    // Print help to stdout
+
     fprintf(stdout, "mattime: progress-logging utility.\n\
 Usage: mattime [OPTION] ...\n\n\
 Options:\n\
@@ -152,105 +118,133 @@ Examples:\n\
   mattime force 50      Total hours is now set to 50\n\n\
 For feedback or issues, please report to developer: saladdressing@mail.com\n\
 ");
+
     return 0;
 }
 
 int date() {
-    // Shows the current time and date
+
+    // Print the current time and date to stdout
 
     time_t rawDatetime = time(NULL);
-    struct tm* Datetime = localtime(&rawDatetime);
-    char datetimeBuffer[80];
+    if (rawDatetime == NULL) {
+        fprintf(stderr, "Couldn't get date and time\n");
+        return 1;
+    }
 
+    struct tm* Datetime = localtime(&rawDatetime);
+    if (Datetime == NULL) {
+        fprintf(stderr, "Couldn't convert date and time to human-readable format\n");
+        return 1;
+    }
+
+    char datetimeBuffer[80];
     strftime(datetimeBuffer, 80, "%H:%M | %d/%m/%Y", Datetime);
+    if (datetimeBuffer == NULL) {
+        fprintf(stderr, "Couldn't format date and time\n");
+        return 1s;
+    }
+
     fprintf(stderr, "Current time & date: %s\n", datetimeBuffer);
     return 0;
 }
 
-int initialiseDatabase(sqlite3* logs) {
-    // Ensures a table is created
-    
-    char* createTableCommand = "CREATE TABLE IF NOT EXISTS Sessions(TotalHours FLOAT, HoursAdded FLOAT, Date TINYTEXT, Time TINYTEXT);";
-    char* errorMessage;
-    if (sqlite3_exec(logs, createTableCommand, 0, 0, &errorMessage) != SQLITE_OK) {
-        fprintf(stderr, "Creating table failed!\nSQL error: %s\n", errorMessage);
-        return 1;
-    }
-    return 0;
-}
-
 int add(int argc, char* argv[], sqlite3* logs) {
-    // Adds <float> number of hours to the total, adding an entry to the log and popping the oldest one off
+
+    char* error;
+
+    // Add passed-in number of hours to the total, adding an entry to the log and popping the oldest one off
 
     if (argc == 2) {
         fprintf(stderr, "mattime add: missing argument\nTry 'mattime --help' for more information.\n");
         return 1;
-    } 
-    else if (argc == 3) {
-        float userInputHours = atof(argv[2]);
-        if (userInputHours != 0) {
-
-            // Build date and time strings
-            time_t rawDatetime = time(NULL);
-            struct tm* Datetime = localtime(&rawDatetime);
-            char dateBuffer[80];
-            char timeBuffer[80];
-            strftime(dateBuffer, 80, "%d/%m/%Y", Datetime);
-            strftime(timeBuffer, 80, "%H:%M", Datetime);
-
-            // Update total hours
-            float previousTotalHours = 0;
-            char* queryTotalCommand = "SELECT TotalHours FROM Sessions WHERE ROWID = (SELECT MAX(ROWID) FROM Sessions);";
-            sqlite3_exec(logs, queryTotalCommand, floatCallback, &previousTotalHours, 0);
-            float newTotalHours = previousTotalHours + userInputHours;
-
-            // Build and execute SQL command
-            char addEntryCommand[500];
-            char* errorMessage1; int returnCode1;
-
-            snprintf(addEntryCommand, 500,
-                    "INSERT INTO Sessions (TotalHours, HoursAdded, Date, Time) VALUES (%0.4f, %0.4f, \"%s\", \"%s\");", 
-                    newTotalHours, userInputHours, dateBuffer, timeBuffer);
-            if (sqlite3_exec(logs, addEntryCommand, 0, 0, &errorMessage1) == SQLITE_OK) {
-                fprintf(stdout, "Successfully logged %s hours.\n", argv[2]);
-            } else {
-                fprintf(stderr, "Adding entry failed!\nSQL error: %s\n", errorMessage1);
-                return 1;
-            }
-
-            // easter eggs
-            if (fmodf(previousTotalHours, 100) > fmodf(newTotalHours, 100)) {
-                fprintf(stdout, "\nCongratulations!! You passed a multiple of 100!!\n");
-            }
-            else if (fmodf(previousTotalHours, 50) > fmodf(newTotalHours, 50)) {
-                fprintf(stdout, "\nCongratulations! You passed a multiple of 50!\n");
-            }
-
-            // Maintain max. number of log entries
-            int numberOfRows = 0;
-            char* errorMessage2; char* errorMessage3;
-            char* countRowsCommand = "SELECT COUNT(*) FROM Sessions;";
-
-            if (sqlite3_exec(logs, countRowsCommand, intCallback, &numberOfRows, &errorMessage2) != SQLITE_OK) {
-                fprintf(stderr, "Counting rows failed!\nSQL error: %s\n", errorMessage2);
-                return 1;
-            }
-            
-            if (numberOfRows > MAX_LOG_ENTRIES) {
-                char* deleteRowCommand = "DELETE FROM Sessions WHERE ROWID = (SELECT MIN(ROWID) FROM Sessions);";
-                if (sqlite3_exec(logs, deleteRowCommand, 0, 0, &errorMessage3) != SQLITE_OK) {
-                    fprintf(stderr, "Deleting rows failed!\nSQL error: %s\n", errorMessage3);
-                    return 1;
-                }
-            }
-
-            return 0;
-        }
     }
-    else {
+
+    if (argc > 3) {
         fprintf(stderr, "mattime add: too many arguments\nTry 'mattime --help' for more information.\n");
         return 1;
     }
+
+    float userInputHours = strtof(argv[2], NULL);
+    if (userInputHours == 0) {
+        // don't abort operation - could be intentional addition of 0 hours
+        fprintf(stdout, "NOTE: adding 0 hours.\nIf this wasn't intentional, parsing input hours failed.\n");
+    }
+
+    // Build date and time strings
+
+    time_t rawDatetime = time(NULL);
+    if (rawDatetime == NULL) {
+        fprintf(stderr, "Couldn't get date and time\n");
+        return 1;
+    }
+
+    struct tm* Datetime = localtime(&rawDatetime);
+    if (Datetime == NULL) {
+        fprintf(stderr, "Couldn't convert date and time into human-readable format\n");
+        return 1;
+    }
+
+    char dateBuffer[DATETIME_BUFSIZE + 1];
+    strftime(dateBuffer, 80, "%d/%m/%Y", Datetime);
+    dateBuffer[DATETIME_BUFSIZE] = '\0';
+
+    char timeBuffer[DATETIME_BUFSIZE + 1];
+    strftime(timeBuffer, 80, "%H:%M", Datetime);
+    timeBuffer[DATETIME_BUFSIZE] = '\0';
+
+    // Update total hours
+
+    float previousTotalHours = 0;
+    char* queryTotalCommand = "SELECT TotalHours FROM Sessions WHERE ROWID = (SELECT MAX(ROWID) FROM Sessions);";
+    if (sqlite3_exec(logs, queryTotalCommand, floatCallback, &previousTotalHours, &error) == NULL) {
+        fprintf(stdout, "Couldn't request current hours: %s", error);
+        sqlite3_free(error);
+        return 1;
+    }
+    float newTotalHours = previousTotalHours + userInputHours;
+
+    // Build and execute SQL command
+    char addEntryCommand[500];
+    char* errorMessage1; int returnCode1;
+
+    snprintf(addEntryCommand, 500,
+            "INSERT INTO Sessions (TotalHours, HoursAdded, Date, Time) VALUES (%0.4f, %0.4f, \"%s\", \"%s\");", 
+            newTotalHours, userInputHours, dateBuffer, timeBuffer);
+    if (sqlite3_exec(logs, addEntryCommand, 0, 0, &errorMessage1) == SQLITE_OK) {
+        fprintf(stdout, "Successfully logged %s hours.\n", argv[2]);
+    } else {
+        fprintf(stderr, "Adding entry failed!\nSQL error: %s\n", errorMessage1);
+        return 1;
+    }
+
+    // easter eggs
+    if (fmodf(previousTotalHours, 100) > fmodf(newTotalHours, 100)) {
+        fprintf(stdout, "\nCongratulations!! You passed a multiple of 100!!\n");
+    }
+    else if (fmodf(previousTotalHours, 50) > fmodf(newTotalHours, 50)) {
+        fprintf(stdout, "\nCongratulations! You passed a multiple of 50!\n");
+    }
+
+    // Maintain max. number of log entries
+    int numberOfRows = 0;
+    char* errorMessage2; char* errorMessage3;
+    char* countRowsCommand = "SELECT COUNT(*) FROM Sessions;";
+
+    if (sqlite3_exec(logs, countRowsCommand, intCallback, &numberOfRows, &errorMessage2) != SQLITE_OK) {
+        fprintf(stderr, "Counting rows failed!\nSQL error: %s\n", errorMessage2);
+        return 1;
+    }
+    
+    if (numberOfRows > MAX_LOG_ENTRIES) {
+        char* deleteRowCommand = "DELETE FROM Sessions WHERE ROWID = (SELECT MIN(ROWID) FROM Sessions);";
+        if (sqlite3_exec(logs, deleteRowCommand, 0, 0, &errorMessage3) != SQLITE_OK) {
+            fprintf(stderr, "Deleting rows failed!\nSQL error: %s\n", errorMessage3);
+            return 1;
+        }
+    }
+
+    return 0;
 }
 
 int total(int argc, char* argv[], sqlite3* logs) {
@@ -468,4 +462,74 @@ int reset(int argc, char* argv[], sqlite3* logs) {
         fprintf(stderr, "Response not recognised. Aborting...\n");
         return 1;
     }
+}
+
+
+int main(int argc, char* argv[]) {
+
+    // set up log reading
+
+    sqlite3* logs;
+    char* home = getenv("HOME");
+
+    if (home == NULL) {
+        fprintf(stderr, "Environment variable $HOME is not set\n");
+        return 1;
+    }
+
+    char path_to_logs[PATH_TO_LOGS_BUFSIZE + 1];
+    snprintf(path_to_logs, PATH_TO_LOGS_BUFSIZE, "%s/%s", home, LOGS_DIRECTORY);
+    path_to_logs[PATH_TO_LOGS_BUFSIZE] = '\0';
+
+    if (sqlite3_open(path_to_logs, &logs) != SQLITE_OK) {
+        fprintf(stderr, "Cannot open database: %s\n", sqlite3_errmsg(logs));
+        sqlite3_close(logs);
+        return 1;
+    }
+
+    if (argc == 1) {
+        info();
+        sqlite3_close(logs);
+        return 0;
+    }
+
+    if (initialiseDatabase(logs)) {
+        return 1;
+    }
+
+    // handle request
+
+    int rc = 0; // return code
+
+    if (argc == 2 && (strcmp(argv[1], "help") == 0 || strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0)) {
+        rc = help();
+    }
+    else if (argc == 2 && (strcmp(argv[1], "date") == 0  || strcmp(argv[1], "-d") == 0)) {
+        rc = date();
+    }
+    else if (strcmp(argv[1], "add") == 0 || strcmp(argv[1], "-a") == 0) {
+        rc = add(argc, argv, logs);
+    }
+    else if (strcmp(argv[1], "total") == 0 || strcmp(argv[1], "-t") == 0) {
+        rc = total(argc, argv, logs);
+    }
+    else if (strcmp(argv[1], "show") == 0 || strcmp(argv[1], "-s") == 0) {
+        rc = show(argc, argv, logs);
+    }
+    else if (strcmp(argv[1], "force") == 0 || strcmp(argv[1], "-f") == 0) {
+        rc = force(argc, argv, logs);
+    }
+    else if (strcmp(argv[1], "undo") == 0 || strcmp(argv[1], "-u") == 0) {
+        rc = undo(argc, argv, logs);
+    }
+    else if (strcmp(argv[1], "reset") == 0 || strcmp(argv[1], "-r") == 0) {
+        rc = reset(argc, argv, logs);
+    }
+    else {
+        fprintf(stdout, "Option not recognised.\n");
+        info();
+    }
+
+    sqlite3_close(logs);
+    return rc;
 }

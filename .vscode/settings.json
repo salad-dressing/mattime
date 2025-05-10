@@ -3,6 +3,7 @@
     "editor.accessibilityPageSize": 101,
     "window.zoomLevel": 2.5,
     "files.associations": {
-        "chrono": "c"
+        "chrono": "c",
+        "time.h": "c"
     }
 }
