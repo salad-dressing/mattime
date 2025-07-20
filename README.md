@@ -15,7 +15,6 @@ Usage: `mattime [OPTION] ...`
 Options:
 ```
   -h, help              Displays the help page
-  -d, date              Displays current time and date
   -a, add               Record an entry with the specified number of hours
   -t, total             Displays the total number of hours and last updated
   -s, show              Show the last 10 entries
