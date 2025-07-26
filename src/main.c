@@ -20,12 +20,12 @@ static const char* help_msg =
     "Usage: mattime [OPTION] ...\n\n"
     "Options:\n"
     "  -h, help              Displays the help page\n"
-    "  -a, add               Record an entry with the specified number of " 
+    "  -a, add <hours>       Record an entry with the specified number of " 
     "hours\n"
     "  -t, total             Displays the total number of hours and last " 
     "updated\n"
     "  -s, show              Show the last 10 entries\n"
-    "  -f, force             Force-set the total hours to the specified value\n"
+    "  -f, force <hours>     Force-set the total hours to the specified value\n"
     "  -u, undo              Remove the last entry\n"
     "  -r, reset             Reset the entire log\n\n"
     "Examples:\n"
@@ -191,7 +191,7 @@ int main(int argc, char* argv[])
         help();
         ret = 0;
     }
-#if 0 
+ 
     else if (!strcmp(argv[1], "add") || !strcmp(argv[1], "-a"))
     {
         ret = add(argc, argv, db);
@@ -199,9 +199,9 @@ int main(int argc, char* argv[])
 
     else if (!strcmp(argv[1], "total") || !strcmp(argv[1], "-t"))
     {
-        ret = total(argc, argv, db);
+        ret = total(argc, db);
     }
-#endif
+
     else if (!strcmp(argv[1], "show") || !strcmp(argv[1], "-s"))
     {
         ret = show(argc, db);
