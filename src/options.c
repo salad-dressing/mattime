@@ -58,75 +58,39 @@ static int stringCallback(void *data, int argc, char **argv, char **azColName) {
 
     return 0;
 }
-
 #endif
 
 /*
-Adds the specified number of hours as an entry.
+Parses the user input (number of hours) as a float, copying into the memory 
+of 'value'.
 
  * ARGUMENTS:
-    argc
-    argv
-    db: pointer to the SQL database object
+    input: user input
+    value: pointer to memory of resulting float
 
  * RETURN VALUE:
-    Returns 0 if success, 1 otherwise.
+    Returns 0 upon success, 1 otherwise.
 */
-int add(int argc, char* argv[], sqlite3* db)
+static int parse_hours(const char* input, float* value)
 {
     int ret = 1;
 
-    int rc = 1;
-    int len = 0;
-    int bytes_written = 0;
-    unsigned int milestone = 0;
-    unsigned int num_of_rows = 0;
-    time_t sec = 0;
-    float added_hrs = 0.0;
-    float prev_total_hrs = 0.0;
-    float new_total_hrs = 0.0;
-    char* error_msg = NULL;
-    char* cmd_tmp = NULL;
-    char* add_entry_cmd = NULL;
-    const char* query_total_cmd = NULL;
-    const char* del_entry_cmd = NULL;
-    const char* congrats_msg = NULL;
-    const char* query_count_cmd = NULL;
-    sqlite3_stmt *add_stmt = NULL;
-    sqlite3_stmt *count_stmt = NULL;
-
-    if (argc == 2)
-    {
-        USR_DEBUG("mattime add: missing argument 'hours'.\n"
-                  "Try 'mattime --help' for more information.\n");
-
-        goto cleanup;
-    }
-
-    if (argc > 3)
-    {
-        USR_DEBUG("mattime add: too many arguments.\n"
-                  "Try 'mattime --help' for more information.\n");
-
-        goto cleanup;
-    }
-
-    /* Parse the user input. */
+    float input_flt = 0.0;
 
     errno = 0;
-    added_hrs = strtof(argv[2], NULL);
+    input_flt = strtof(input, NULL);
     if (errno)
     {
         LOG_ERROR("call to strtof with:\n"
             " * nptr: %s\n" 
             "failed with errno %d (%s)\n",
-            argv[2], errno, strerror(errno));
+            input, errno, strerror(errno));
         USR_ERROR("An error occurred parsing the argument 'hours'.\n");
 
-        goto cleanup;
+        goto exit;
     }
 
-    if (added_hrs == 0.0)
+    if (input_flt == 0.0)
     {
         /* strtof returns 0 when no conversion was performed. 
         This (although unlikely) could be intentional, so don't exit. */
@@ -134,24 +98,44 @@ int add(int argc, char* argv[], sqlite3* db)
         LOG_DEBUG("call to strtof with:\n"
             " * nptr: %s\n" 
             "returned %f.\n",
-            argv[2], added_hrs);
+            input, input_flt);
 
         USR_DEBUG("Read 'hours' as 0.\n" 
-            "If this wasn't intended, an error occurred parsing user " 
+            "If this wasn't intentional, an error occurred parsing the user " 
             "input.\n");
     }
 
-    if (added_hrs < 0.0)
-    {
-        LOG_ERROR("attempted entry with negative hours: %d\n", added_hrs);
-        USR_ERROR("mattime add: hours must be positive.\n");
+    /* Success. */
 
-        goto cleanup;
-    }
+    *value = input_flt;
+    ret = 0;
 
-    /* Before adding an entry, enforce the maximum number of log entries to 
-    keep in the database. If it would exceed the limit, remove the oldest 
-    entry first. */
+exit:
+    return ret;
+}
+
+/*
+Enforces a limit of N entries in the database, deleting oldest entries first.
+Pre-empts the imminent addition of another row, leaving a maximum of N-1 
+entries in the database.
+
+ * ARGUMENTS:
+    N: maximum number of entries allowed
+    db: pointer to the SQL database object
+*/
+static int maintain_max_logs(unsigned int N, sqlite3* db)
+{
+    int ret = 1;
+
+    int rc = 1;
+    int len = 0;
+    int bytes_written = 0;
+    unsigned int num_of_rows = 0;
+    char* error_msg = NULL;
+    char* del_entry_cmd = NULL;
+    const char* query_count_cmd = NULL;
+    const char* del_entry_cmd_tmp = NULL;
+    sqlite3_stmt *count_stmt = NULL;
 
     query_count_cmd = "SELECT COUNT(*) FROM Sessions;";
 
@@ -181,12 +165,32 @@ int add(int argc, char* argv[], sqlite3* db)
 
     num_of_rows = (unsigned int)sqlite3_column_int(count_stmt, 0);
 
-    if (num_of_rows > MAX_LOG_ENTRIES)
+    if (num_of_rows >= N)
     {
         /* Delete the oldest entry from the table to make room. */
 
-        del_entry_cmd = "DELETE FROM Sessions "
-            "WHERE ROWID = (SELECT MIN(ROWID) FROM Sessions);";
+        del_entry_cmd_tmp = "DELETE FROM Sessions WHERE ROWID IN "
+            "(SELECT ROWID FROM Sessions ORDER BY ROWID ASC LIMIT %u);";
+
+        len = snprintf(NULL, 0, del_entry_cmd_tmp, N);
+        del_entry_cmd = calloc(1, len + 1);
+        bytes_written = snprintf(del_entry_cmd, len + 1, del_entry_cmd_tmp, N);
+        if (bytes_written < len)
+        {
+            /* Catch both errors and early truncation. */
+
+            LOG_ERROR("call to snprintf with parameters:\n" 
+                " * del_entry_cmd (buffer)\n" 
+                " * len + 1: %d\n" 
+                " * del_entry_cmd_tmp: %s\n"
+                " * N: %u\n"
+                "returned: %d (expected: %d)\n",
+                len + 1, del_entry_cmd_tmp, N, bytes_written, len);
+            USR_ERROR("An error occurred constructing the query to the " 
+                "database.\n");
+
+            goto cleanup;
+        }
 
         rc = sqlite3_exec(db, del_entry_cmd, 0, 0, &error_msg);
         if (rc != SQLITE_OK)
@@ -201,6 +205,99 @@ int add(int argc, char* argv[], sqlite3* db)
 
             goto cleanup;
         }
+    }
+
+    /* Success. */
+
+    ret = 0;
+
+cleanup:
+
+    if (del_entry_cmd)
+    {
+        free(del_entry_cmd);
+    }
+    if (error_msg)
+    {
+        sqlite3_free(error_msg);
+    }
+    if (count_stmt)
+    {
+        sqlite3_finalize(count_stmt);
+    }
+    
+    return ret;
+}
+
+/*
+Adds an entry to the database.
+
+ * ARGUMENTS:
+    argc
+    argv
+    db: pointer to the SQL database object
+
+ * RETURN VALUE:
+    Returns 0 if success, 1 otherwise.
+*/
+int add(int argc, char* argv[], sqlite3* db)
+{
+    int ret = 1;
+
+    int rc = 1;
+    int len = 0;
+    int bytes_written = 0;
+    unsigned int milestone = 0;
+    time_t sec = 0;
+    float added_hrs = 0.0;
+    float prev_total_hrs = 0.0;
+    float new_total_hrs = 0.0;
+    char* error_msg = NULL;
+    char* cmd_tmp = NULL;
+    char* add_entry_cmd = NULL;
+    const char* query_total_cmd = NULL;
+    const char* congrats_msg = NULL;
+    sqlite3_stmt *add_stmt = NULL;
+
+    if (argc == 2)
+    {
+        USR_DEBUG("mattime add: missing argument 'hours'.\n"
+                  "Try 'mattime --help' for more information.\n");
+
+        goto cleanup;
+    }
+
+    if (argc > 3)
+    {
+        USR_DEBUG("mattime add: too many arguments.\n"
+                  "Try 'mattime --help' for more information.\n");
+
+        goto cleanup;
+    }
+
+    /* Parse the user input. */
+
+    rc = parse_hours(argv[2], &added_hrs);
+    if (rc)
+    {
+        goto cleanup;
+    }
+
+    if (added_hrs < 0.0)
+    {
+        LOG_ERROR("attempted entry with negative hours: %d\n", added_hrs);
+        USR_ERROR("mattime add: hours must be positive.\n");
+
+        goto cleanup;
+    }
+
+    /* Before adding an entry, enforce the maximum number of log entries to 
+    keep in the database. */
+
+    rc = maintain_max_logs(MAX_LOG_ENTRIES, db);
+    if (rc)
+    {
+        goto cleanup;
     }
 
     /* Now prepare the components for adding an entry. */
@@ -279,7 +376,7 @@ int add(int argc, char* argv[], sqlite3* db)
     it. Print any congratulations. */
 
     cmd_tmp = "INSERT INTO Sessions (TotalHours, HoursAdded, Time) "
-        "VALUES (%0.2f, %0.2f, %lu);";
+        "VALUES (%.2f, %.2f, %lu);";
 
     len = snprintf(NULL, 0, cmd_tmp, 
                             new_total_hrs, 
@@ -299,8 +396,8 @@ int add(int argc, char* argv[], sqlite3* db)
             " * cmd (buffer)\n" 
             " * len + 1: %d\n" 
             " * cmd_tmp: %s\n"
-            " * new_total_hrs: %0.2f\n"
-            " * added_hrs: %0.2f\n"
+            " * new_total_hrs: %.2f\n"
+            " * added_hrs: %.2f\n"
             " * sec: %lu\n"
             "returned: %d (expected: %d)\n",
             len + 1, cmd_tmp, new_total_hrs, added_hrs, 
@@ -328,8 +425,8 @@ int add(int argc, char* argv[], sqlite3* db)
     {
         LOG_DEBUG("passed milestone:\n" 
             " * multiple of: %u\n"
-            " * previous total: %0.2f\n"
-            " * new total: %0.2f\n",
+            " * previous total: %.2f\n"
+            " * new total: %.2f\n",
             milestone, prev_total_hrs, new_total_hrs);
 
         USR_DEBUG(congrats_msg);
@@ -338,12 +435,12 @@ int add(int argc, char* argv[], sqlite3* db)
     /* Success. */
 
     LOG_DEBUG("added entry:\n" 
-        " * TotalHours: %0.2f\n"
-        " * HoursAdded: %0.2f\n"
+        " * TotalHours: %.2f\n"
+        " * HoursAdded: %.2f\n"
         " * Time: %lu\n",
         new_total_hrs, added_hrs, (unsigned long)sec);
 
-    USR_DEBUG("Successfully added %0.2f hours.\n", added_hrs);
+    USR_DEBUG("Successfully added %.2f hours.\n", added_hrs);
 
     ret = 0;
 
@@ -352,13 +449,13 @@ cleanup:
     {
         sqlite3_finalize(add_stmt);
     }
-    if (count_stmt)
-    {
-        sqlite3_finalize(count_stmt);
-    }
     if (error_msg)
     {
         sqlite3_free(error_msg);
+    }
+    if (add_entry_cmd)
+    {
+        free(add_entry_cmd);
     }
 
     return ret;
@@ -553,7 +650,7 @@ int show(int argc, sqlite3* db)
         entries++;
     }
 
-    if (rc != SQLITE_DONE)
+    if (rc == SQLITE_ERROR)
     {
         LOG_ERROR("sqlite3_step failed with error message: %s\n",
             sqlite3_errmsg(db));
@@ -609,79 +706,210 @@ cleanup:
     return ret;
 }
 
-#if 0
-int force(int argc, char* argv[], sqlite3* logs) {
-    // Force-sets the number of hours to a value (with double checking)
+/*
+Confirm with the user whether to continue or not. Auxiliary to 'mattime force'.
+If happy to proceed, function returns 0 printing nothing.
+If unhappy or an error occurs, return 1 and prints an appropriate message.
 
-    if (argc == 2) {
-        fprintf(stderr, "mattime set: missing argument\nTry 'mattime --help' for more information.\n");
-        return 1;
-    }
+ * ARGUMENTS:
+    new_hrs: the number of hours to confirm as new total
 
-    else if (argc == 3) {
-        float userInputTotalHours = atof(argv[2]);
-        if (userInputTotalHours > 0) {
+ * RETURN VALUE:
+    Returns 0 on 'yes', 1 otherwise.
+*/
+static int usr_confirm(float new_hrs)
+{
+    int ret = 1;
 
-            // Build date and time strings
-            time_t rawDatetime = time(NULL);
-            struct tm* Datetime = localtime(&rawDatetime);
-            char dateBuffer[80];
-            char timeBuffer[80];
-            strftime(dateBuffer, 80, "%d/%m/%Y", Datetime);
-            strftime(timeBuffer, 80, "%H:%M", Datetime);
+    // Safe size for \n, \0 etc.
+    #define BUF_LEN 10
 
-            // Build and execute SQL command
-            char addEntryCommand[500];
-            char* errorMessage; int returnCode;
-            snprintf(addEntryCommand, 500,
-                    "INSERT INTO Sessions (TotalHours, HoursAdded, Date, Time) VALUES (%0.4f, %d, \"%s\", \"%s\");", 
-                    userInputTotalHours, 0, dateBuffer, timeBuffer);
+    char input[BUF_LEN] = {0};
+
+    USR_DEBUG("Confirm action: force total hours to %.2f? [y/n]", new_hrs);
     
-            fprintf(stdout, "Confirm action: force total hours to %0.1f? (Type y/n)\n", userInputTotalHours);
-            char response = '0'; scanf("%c", &response);
-            if (response == 'y') {
-                returnCode = sqlite3_exec(logs, addEntryCommand, 0, 0, &errorMessage);
-                if (returnCode == SQLITE_OK) {
-                    fprintf(stdout, "Successfully set total hours to %0.1f.\n", userInputTotalHours);
-                } else {
-                    fprintf(stderr, "Setting hours failed!\nSQL error: %s\n", errorMessage);
-                    return 1;
-                }
-            }
-            else if (response == 'n') {
-                fprintf(stdout, "Action aborted.\n");
-                return 1;
-            }
-            else {
-                fprintf(stderr, "Response not recognised.\n");
-                return 1;
-            }
+    if (!fgets(input, sizeof(input), stdin))
+    {
+        LOG_ERROR("fgets returned NULL; buffer: %s\n", input);
+        USR_ERROR("An error occurred reading user input.");
 
-            // Maintain a maximum number of log entries
-            int numberOfRows = 0;
-            char* countRowsCommand = "SELECT COUNT(*) FROM Sessions;";
-            sqlite3_exec(logs, countRowsCommand, intCallback, &numberOfRows, 0);
-            if (numberOfRows > MAX_LOG_ENTRIES) {
-                char* deleteRowCommand = "DELETE FROM Sessions WHERE ROWID = (SELECT MIN(ROWID) FROM Sessions);";
-                sqlite3_exec(logs, deleteRowCommand, 0, 0, 0);
-            } 
-        }
+        goto exit;
+    }
+    input[BUF_LEN - 1] = '\0'; // Double-check before possibly printing
 
-        else {
-            fprintf(stderr, "Invalid hours requested.\n");
-            return 1;
-        }
+    if ((input[0] == 'y' || input[0] == 'Y') && input[1] == '\n')
+    {
+        /* Happy to proceed. */
+
+        ret = 0;
+    }
+    else if ((input[0] == 'n' || input[0] == 'N') && input[1] == '\n')
+    {
+        USR_DEBUG("Aborting...\n");
+    }
+    else
+    {
+        LOG_ERROR("user input detected as: %s\n"
+            "Not recognised as one of [y/Y/n/N].\n",
+            input);
+        USR_ERROR("Unrecognised input. Aborting...\n");
     }
 
-    else {
-        fprintf(stderr, "mattime set: too many arguments\nTry 'mattime --help' for more information.\n");
-        return 1;
-    }
-
-    return 0;
-
+exit:
+    return ret;
 }
 
+/*
+Sets the total number of hours to a given value.
+
+ * ARGUMENTS:
+    argc
+    argv
+    db: pointer to the SQL database object
+
+ * RETURN VALUE:
+    Returns 0 if success, 1 otherwise.
+*/
+int force(int argc, char* argv[], sqlite3* db)
+{
+    int ret = 1;
+
+    int rc = 1;
+    int len = 0;
+    int bytes_written = 0;
+    time_t sec = 0;
+    float new_hrs = 0.0;
+    char* cmd = NULL;
+    char* error_msg = NULL;
+    const char* cmd_tmp = NULL;
+
+    if (argc == 2)
+    {
+        USR_DEBUG("mattime force: missing argument 'hours'.\n"
+                  "Try 'mattime --help' for more information.\n");
+
+        goto cleanup;
+    }
+
+    if (argc > 3)
+    {
+        USR_DEBUG("mattime force: too many arguments.\n"
+                  "Try 'mattime --help' for more information.\n");
+
+        goto cleanup;
+    }
+
+    /* Parse the user input. */
+
+    rc = parse_hours(argv[2], &new_hrs);
+    if (rc)
+    {
+        goto cleanup;
+    }
+
+    if (new_hrs < 0.0)
+    {
+        LOG_ERROR("attempted entry with negative hours: %d\n", new_hrs);
+        USR_ERROR("mattime force: hours must be positive.\n");
+
+        goto cleanup;
+    }
+
+    /* Confirm the action with the user. */
+
+    rc = usr_confirm(new_hrs);
+    if (rc)
+    {
+        goto cleanup;
+    }
+
+    /* Before adding an entry, enforce the maximum number of log entries to 
+    keep in the database. */
+
+    rc = maintain_max_logs(MAX_LOG_ENTRIES, db);
+    if (rc)
+    {
+        goto cleanup;
+    }
+
+    /* Construct and execute the query. */
+
+    errno = 0;
+    sec = time(NULL);
+    if (errno || sec < 0) // Both should be True upon an error
+    {
+        LOG_ERROR("call to time(NULL) failed with errno: %d (%s)\n",
+            errno, strerror(errno));
+
+        USR_ERROR("An error occurred fetching the current time.\n");
+
+        goto cleanup;
+    }
+
+    cmd_tmp = "INSERT INTO Sessions (TotalHours, HoursAdded, Time) "
+        "VALUES (%.2f, %.2f, %lu);";
+
+    len = snprintf(NULL, 0, cmd_tmp, 
+                            new_hrs, 
+                            0.0, 
+                            (unsigned long)sec);
+    cmd = calloc(1, len + 1);
+    bytes_written = snprintf(cmd, len + 1, 
+                            cmd_tmp, 
+                            new_hrs, 
+                            0.0, 
+                            (unsigned long)sec);
+    if (bytes_written < len)
+    {
+        /* Catch both errors and early truncation. */
+
+        LOG_ERROR("call to snprintf with parameters:\n" 
+            " * cmd (buffer)\n" 
+            " * len + 1: %d\n" 
+            " * cmd_tmp: %s\n"
+            " * new_hrs: %.2f\n"
+            " * added_hrs: 0.0\n"
+            " * sec: %lu\n"
+            "returned: %d (expected: %d)\n",
+            len + 1, cmd_tmp, new_hrs, 
+            (unsigned long)sec, bytes_written, len);
+        USR_ERROR("An error occurred constructing the query to the " 
+            "database.\n");
+
+        goto cleanup;
+    }
+
+    rc = sqlite3_exec(db, cmd, 0, 0, &error_msg);
+    if (rc != SQLITE_OK)
+    {
+        LOG_DEBUG("call to sqlite3_exec with:\n"
+            " * cmd: %s\n" 
+            "returned error message: %s\n",
+            cmd, error_msg);
+
+        USR_DEBUG("An error occurred adding an entry to the database.\n");
+
+        goto cleanup;
+    }
+
+    /* Success. */
+
+    USR_DEBUG("Success: set total hours to %.2f.\n", new_hrs);
+    ret = 0;
+
+cleanup:
+    if (cmd)
+    {
+        free(cmd);
+    }
+    if (error_msg)
+    {
+        sqlite3_free(error_msg);
+    }
+    return ret;
+}
+
+#if 0
 int undo(int argc, char* argv[], sqlite3* logs) {
     // Removes latest entry
 

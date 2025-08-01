@@ -206,12 +206,12 @@ int main(int argc, char* argv[])
     {
         ret = show(argc, db);
     }
-#if 0
+
     else if (!strcmp(argv[1], "force") || !strcmp(argv[1], "-f"))
     {
         ret = force(argc, argv, db);
     }
-
+#if 0        
     else if (!strcmp(argv[1], "undo") || !strcmp(argv[1], "-u"))
     {
         ret = undo(argc, argv, db);
