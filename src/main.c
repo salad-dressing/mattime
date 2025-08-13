@@ -1,9 +1,13 @@
+#include <linux/limits.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>
 #include <sqlite3.h>
+#include <unistd.h>
+#include <errno.h>
 
+#include "config.h"
 #include "options.h"
 #include "utilities.h"
 
@@ -27,7 +31,7 @@ static const char* help_msg =
     "  -s, show              Show the last 10 entries\n"
     "  -f, force <hours>     Force-set the total hours to the specified value\n"
     "  -u, undo              Remove the last entry\n"
-    "  -r, reset             Reset the entire log\n\n"
+    "  -r, reset             Remove all entries\n\n"
     "Examples:\n"
     "  mattime add 10        Adds 10 hours to the total\n"
     "  mattime force 50      Total hours is now set to 50\n\n"
@@ -35,7 +39,117 @@ static const char* help_msg =
     "saladdressing@mail.com\n";
 
 /*
-Ensure that a Sessions table is created, if not already.
+Creates a buffer containing the absolute path of a file by stitching together 
+the path to $HOME and the relative path to the file.
+
+ * ARGUMENTS:
+    path: path to file relative from home
+
+ * RETURN VALUE:
+    Pointer to the buffer.
+
+ * NOTE:
+    The buffer is created dynamically. It must be freed by the user before 
+    exiting the program.
+*/
+static char* get_abs_path(const char* path)
+{
+    char* ret = NULL;
+
+    int rc = 1;
+    char* buf = NULL;
+    char* home = NULL;
+    size_t buf_len = 0;
+
+    /* Fetch the value of $HOME. */
+
+    home = getenv("HOME");
+    if (!home)
+    {
+        USR_DEBUG("Environment variable $HOME is not set.\n" 
+              "Please set this so that logs can be created in the appropriate "
+              "location.\n");
+
+        goto cleanup;
+    }
+
+    /* Paste the two parts into a new buffer. */
+
+    buf_len = strlen(home) + 1 + strlen(path);
+    buf = calloc(1, buf_len + 1);
+
+    rc = snprintf(buf, buf_len + 1, "%s/%s", home, path);
+    if (rc < (int)buf_len)
+    {
+        /* Catch both errors and early truncation. */
+
+        LOG_ERROR("call to snprintf with parameters:\n" 
+                  " * str (buffer)\n" 
+                  " * size: %zu\n" 
+                  " * home (arg): %s\n",
+                  " * path (arg): %s\n",
+                  "returned: %d (expected: %d)\n",
+                  buf_len, home, path, rc, buf_len);
+        USR_ERROR("An error occurred creating the path to the log file.\n");
+
+        goto cleanup;
+    }
+
+    buf[buf_len] = '\0';
+
+    /* Success. */
+
+    ret = buf;
+    buf = NULL;
+
+cleanup:
+    if (buf)
+    {
+        free(buf);
+    }
+
+    return ret;
+}
+
+/*
+Opens a file descriptor to the log file in the global variable g_log_fp.
+
+ * RETURN VALUE:
+    Returns 0 upon success, 1 otherwise.
+*/
+static int init_log(const char* path)
+{
+    int ret = 1;
+
+    /* g_log_fp declared in utilities.h. */
+
+    /* Creates file if it does not already exist. */
+
+    errno = 0;
+    g_log_fp = fopen(path, "a");
+    if (!g_log_fp)
+    {
+        /* Forced to print errno information to the user as there is no other 
+        log-like location to print to. 
+
+        Don't use USR_ERROR as the boilerplate message asks the user to check 
+        the log file, which in this case will not help. */
+
+        USR_DEBUG("An error occurred initialising the log file: "
+            "errno %d (%s)\n", errno, strerror(errno));
+        goto exit;
+    }
+
+    /* Success, g_log_fp is set. */
+
+    ret = 0;
+
+exit:
+    return ret;
+}
+
+/*
+Ensure that the Sessions table is created in the database, if not already.
 
  * ARGUMENTS:
     db: ptr to a sqlite3 object
@@ -43,7 +157,7 @@ Ensure that a Sessions table is created, if not already.
  * RETURN VALUE:
     Returns 0 upon success, 1 otherwise.
 */
-int init_db(sqlite3* db)
+static int init_table(sqlite3* db)
 {
     int ret = 1;
 
@@ -111,48 +225,35 @@ int main(int argc, char* argv[])
     int ret = 1;
 
     int rc = 1;
-    char* home = NULL;
     char* db_path = NULL;
+    char* log_path = NULL;
     sqlite3* db = NULL;
+
+    /*
+    Initialise the log file.
+    */
+
+    log_path = get_abs_path(LOGFILE_PATH);
+    if (!log_path)
+    {
+        goto cleanup;
+    }
+
+    rc = init_log(log_path);
+    if (rc)
+    {
+        goto cleanup;
+    }
 
     /*
     Initialise the database.
     */
 
-    home = getenv("HOME");
-    if (!home)
+    db_path = get_abs_path(DATABASE_PATH);
+    if (!db_path)
     {
-        USR_DEBUG("Environment variable $HOME is not set.\n" 
-              "Please set this so that logs can be created in the appropriate "
-              "location.\n");
-
         goto cleanup;
     }
-
-    size_t buf_len = strlen(home) + 1 + strlen(DATABASE);
-    
-    /* Dynamically allocate due to the goto jump before this.
-    If it was static memory, the jump would bypass the initialisation of 
-    db_path on the stack. */
-    db_path = calloc(1, buf_len + 1);
-
-    rc = snprintf(db_path, buf_len + 1, "%s/%s", home, DATABASE);
-    if (rc < (int)buf_len)
-    {
-        /* Catch both errors and early truncation. */
-
-        LOG_ERROR("call to snprintf with parameters:\n" 
-                  " * db_path (buffer)\n" 
-                  " * buf_len: %zu\n" 
-                  " * home: %s\n",
-                  " * DATABASE: %s\n",
-                  "returned: %d (expected: %d)\n",
-                  buf_len, home, DATABASE, rc, buf_len);
-        USR_ERROR("An error occurred creating the path to the log file.\n");
-
-        goto cleanup;
-    }
-    db_path[buf_len] = '\0';
 
     rc = sqlite3_open(db_path, &db);
     if (rc != SQLITE_OK)
@@ -164,8 +265,14 @@ int main(int argc, char* argv[])
         goto cleanup;
     }
 
+    rc = init_table(db);
+    if (rc)
+    {
+        goto cleanup;
+    }
+
     /*
-    Process user arguments and initialise the database.
+    Handle user request.
     */
 
     if (argc == 1)
@@ -173,16 +280,6 @@ int main(int argc, char* argv[])
         info();
         goto cleanup;
     }
-
-    rc = init_db(db);
-    if (rc)
-    {
-        goto cleanup;
-    }
-
-    /*
-    Handle the request.
-    */
 
     if (argc == 2 && (!strcmp(argv[1], "help")
                       || !strcmp(argv[1], "-h") 
@@ -211,12 +308,12 @@ int main(int argc, char* argv[])
     {
         ret = force(argc, argv, db);
     }
-#if 0        
+     
     else if (!strcmp(argv[1], "undo") || !strcmp(argv[1], "-u"))
     {
-        ret = undo(argc, argv, db);
+        ret = undo(argc, db);
     }
-
+#if 0
     else if (!strcmp(argv[1], "reset") || !strcmp(argv[1], "-r"))
     {
         ret = reset(argc, argv, db);
@@ -234,7 +331,10 @@ cleanup:
     {
         free(db_path);
     }
-    
+    if (log_path)
+    {
+        free(log_path);
+    }
     if (db)
     {
         sqlite3_close(db);

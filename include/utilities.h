@@ -1,3 +1,10 @@
+#include <bits/types/FILE.h>
+
+/*
+Set in main.c: init_log().
+*/
+extern FILE* g_log_fp;
+
 /*
 Prints a debug/info message to the log file.
 */

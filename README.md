@@ -1,8 +1,10 @@
-# mattime 🥋
-mattime: progress-logging utility for martial art enthusiasts.
+# mattime
+
+mattime: a lightweight CLI utility to log hours of progress
 
 ## Installation
-Clone the repository, and run the `install.sh` script within it as superuser.
+
+Clone the repository, and run the `install` script within it as superuser.
 ```
 git clone https://github.com/salad-dressing/mattime.git
 cd mattime
@@ -10,6 +12,7 @@ sudo ./install.sh
 ```
 
 ## Usage
+
 Usage: `mattime [OPTION] ...`
 
 Options:
@@ -27,4 +30,10 @@ Examples:
   mattime add 10        Adds 10 hours to the total
   mattime force 50      Total hours is now set to 50
 ```
-For feedback or issues, please report to developer: saladdressing@mail.com
+For feedback or issues, please report to the developer: saladdressing@mail.com
+
+## Configuration
+
+`mattime` aims to be highly customisable via `include/config.h`. After making 
+any changes, `mattime` can be easily rebuilt by running the `install` script.
+

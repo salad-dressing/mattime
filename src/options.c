@@ -7,58 +7,14 @@
 #include <time.h>
 #include <errno.h>
 
+#include "config.h"
 #include "utilities.h"
 #include "options.h"
 
 /*
 Safely assume for all options that argc > 1.
 */
-#if 0
-static int floatCallback(void* data, int argc, char** argv, char** azColName) {
-    if (argc == 1 && argv[0]) {
-        *(float*)data = strtof(argv[0], NULL); // Convert the result to float and store it in data
-    }
-    return 0;
-}
 
-static int intCallback(void *data, int argc, char **argv, char **azColName) {
-    if (argc == 1 && argv[0]) {
-        *(int*)data = atoi(argv[0]); // Convert the result to int and store it in data
-    }
-    return 0;
-}
-
-static int stringCallback(void *data, int argc, char **argv, char **azColName) {
-
-    // for add()
-    if (argc == 2) {
-        char** result = (char **)data;
-        char* returnString = strcat(strdup(argv[0]), " | ");
-        *result = strcat(returnString, strdup(argv[1]));
-    }
-
-    // for show() and undo()
-    else if (argc == 4) {
-        char* returnString = (char *) malloc(200);
-        returnString[0] = '\0'; //initialise
-
-        strcat(returnString, "|   ");
-        strcat(returnString, strdup(argv[0]));
-        strcat(returnString, "    |    ");
-        strcat(returnString, strdup(argv[1]));
-        strcat(returnString, "    | ");
-        strcat(returnString, strdup(argv[2]));
-        strcat(returnString, " | ");
-        strcat(returnString, strdup(argv[3]));
-        strcat(returnString, " |");
-        
-        fprintf(stdout, "| %-14s| %-14s| %-11s| %-6s|\n", argv[0],argv[1],argv[2],argv[3]);
-    }
-    
-
-    return 0;
-}
-#endif
 
 /*
 Parses the user input (number of hours) as a float, copying into the memory 
@@ -123,7 +79,7 @@ entries in the database.
     N: maximum number of entries allowed
     db: pointer to the SQL database object
 */
-static int maintain_max_logs(unsigned int N, sqlite3* db)
+static int maintain_max_entries(unsigned int N, sqlite3* db)
 {
     int ret = 1;
 
@@ -230,6 +186,57 @@ cleanup:
 }
 
 /*
+Receive [y/n] from the user on whether to continue or not.
+If happy to proceed, function returns 0 printing nothing.
+If unhappy or an error occurs, return 1 and prints an appropriate message.
+
+ * ARGUMENTS:
+    new_hrs: the number of hours to confirm as new total
+
+ * RETURN VALUE:
+    Returns 0 on 'yes', 1 otherwise.
+*/
+static int usr_confirm()
+{
+    int ret = 1;
+
+    // Safe size for \n, \0 etc.
+    #define BUF_LEN 10
+
+    char input[BUF_LEN] = {0};
+    
+    if (!fgets(input, sizeof(input), stdin))
+    {
+        LOG_ERROR("fgets returned NULL; buffer: %s\n", input);
+        USR_ERROR("An error occurred reading user input.");
+
+        goto exit;
+    }
+    input[BUF_LEN - 1] = '\0'; // Double-check before possibly printing
+
+    if ((input[0] == 'y' || input[0] == 'Y') && input[1] == '\n')
+    {
+        /* Happy to proceed. */
+
+        ret = 0;
+    }
+    else if ((input[0] == 'n' || input[0] == 'N') && input[1] == '\n')
+    {
+        USR_DEBUG("Aborting...\n");
+    }
+    else
+    {
+        LOG_ERROR("user input detected as: %s\n"
+            "Not recognised as one of [y/Y/n/N].\n",
+            input);
+        USR_ERROR("Unrecognised input. Aborting...\n");
+    }
+
+exit:
+    return ret;
+}
+
+/*
 Adds an entry to the database.
 
  * ARGUMENTS:
@@ -294,7 +301,7 @@ int add(int argc, char* argv[], sqlite3* db)
     /* Before adding an entry, enforce the maximum number of log entries to 
     keep in the database. */
 
-    rc = maintain_max_logs(MAX_LOG_ENTRIES, db);
+    rc = maintain_max_entries(MAX_LOG_ENTRIES, db);
     if (rc)
     {
         goto cleanup;
@@ -411,12 +418,12 @@ int add(int argc, char* argv[], sqlite3* db)
     rc = sqlite3_exec(db, add_entry_cmd, 0, 0, &error_msg);
     if (rc != SQLITE_OK)
     {
-        LOG_DEBUG("call to sqlite3_exec with:\n"
+        LOG_ERROR("call to sqlite3_exec with:\n"
             " * cmd: %s\n" 
             "returned error message: %s\n",
             add_entry_cmd, error_msg);
 
-        USR_DEBUG("An error occurred adding an entry to the database.\n");
+        USR_ERROR("An error occurred adding an entry to the database.\n");
 
         goto cleanup;
     }
@@ -707,59 +714,6 @@ cleanup:
 }
 
 /*
-Confirm with the user whether to continue or not. Auxiliary to 'mattime force'.
-If happy to proceed, function returns 0 printing nothing.
-If unhappy or an error occurs, return 1 and prints an appropriate message.
-
- * ARGUMENTS:
-    new_hrs: the number of hours to confirm as new total
-
- * RETURN VALUE:
-    Returns 0 on 'yes', 1 otherwise.
-*/
-static int usr_confirm(float new_hrs)
-{
-    int ret = 1;
-
-    // Safe size for \n, \0 etc.
-    #define BUF_LEN 10
-
-    char input[BUF_LEN] = {0};
-
-    USR_DEBUG("Confirm action: force total hours to %.2f? [y/n]", new_hrs);
-    
-    if (!fgets(input, sizeof(input), stdin))
-    {
-        LOG_ERROR("fgets returned NULL; buffer: %s\n", input);
-        USR_ERROR("An error occurred reading user input.");
-
-        goto exit;
-    }
-    input[BUF_LEN - 1] = '\0'; // Double-check before possibly printing
-
-    if ((input[0] == 'y' || input[0] == 'Y') && input[1] == '\n')
-    {
-        /* Happy to proceed. */
-
-        ret = 0;
-    }
-    else if ((input[0] == 'n' || input[0] == 'N') && input[1] == '\n')
-    {
-        USR_DEBUG("Aborting...\n");
-    }
-    else
-    {
-        LOG_ERROR("user input detected as: %s\n"
-            "Not recognised as one of [y/Y/n/N].\n",
-            input);
-        USR_ERROR("Unrecognised input. Aborting...\n");
-    }
-
-exit:
-    return ret;
-}
-
-/*
 Sets the total number of hours to a given value.
 
  * ARGUMENTS:
@@ -817,7 +771,8 @@ int force(int argc, char* argv[], sqlite3* db)
 
     /* Confirm the action with the user. */
 
-    rc = usr_confirm(new_hrs);
+    USR_DEBUG("Confirm action: force total hours to %.2f? [y/n]", new_hrs);
+    rc = usr_confirm();
     if (rc)
     {
         goto cleanup;
@@ -826,7 +781,7 @@ int force(int argc, char* argv[], sqlite3* db)
     /* Before adding an entry, enforce the maximum number of log entries to 
     keep in the database. */
 
-    rc = maintain_max_logs(MAX_LOG_ENTRIES, db);
+    rc = maintain_max_entries(MAX_LOG_ENTRIES, db);
     if (rc)
     {
         goto cleanup;
@@ -882,12 +837,12 @@ int force(int argc, char* argv[], sqlite3* db)
     rc = sqlite3_exec(db, cmd, 0, 0, &error_msg);
     if (rc != SQLITE_OK)
     {
-        LOG_DEBUG("call to sqlite3_exec with:\n"
+        LOG_ERROR("call to sqlite3_exec with:\n"
             " * cmd: %s\n" 
             "returned error message: %s\n",
             cmd, error_msg);
 
-        USR_DEBUG("An error occurred adding an entry to the database.\n");
+        USR_ERROR("An error occurred adding an entry to the database.\n");
 
         goto cleanup;
     }
@@ -909,55 +864,133 @@ cleanup:
     return ret;
 }
 
-#if 0
-int undo(int argc, char* argv[], sqlite3* logs) {
-    // Removes latest entry
+/*
+Removes the most recent entry in the database.
 
-    char* showLatestEntryCommand = "SELECT * FROM Sessions WHERE ROWID = (SELECT MAX(ROWID) FROM Sessions);";
-    char* deleteLatestEntryCommand = "DELETE FROM Sessions WHERE ROWID = (SELECT MAX(ROWID) FROM Sessions);";
+ * ARGUMENTS:
+    argc
+    db: pointer to the SQL database object
 
-    if (argc == 2) {
-        char* errorMessage1; char* errorMessage2; int returnCode1; int returnCode2;
-        
-        fprintf(stdout, "Confirm action: remove latest entry:\n\n");
-        fprintf(stdout, "| Total Hrs     | Added Hrs     | Date       | Time  |\n");
-        returnCode1 = sqlite3_exec(logs, showLatestEntryCommand, stringCallback, 0, &errorMessage1);
-        if (returnCode1 != SQLITE_OK) {
-            fprintf(stderr, "Requesting latest entry failed!\nSQL error: %s\n", errorMessage1);
-            return 1;
-        }
-        fprintf(stdout, "(Type y/n)\n");
-        char response = '0'; scanf("%c", &response);
+ * RETURN VALUE:
+    Returns 0 if success, 1 otherwise.
+*/
+int undo(int argc, sqlite3* db)
+{
+    int ret = 1;
 
-        if (response == 'y') {
-            returnCode2 = sqlite3_exec(logs, deleteLatestEntryCommand, 0, 0, &errorMessage2);
-            if (returnCode2 == SQLITE_OK) {
-                fprintf(stdout, "Successfully removed latest entry.\n");
-            } else {
-                fprintf(stderr, "Deleting latest entry failed!\nSQL error: %s\n", errorMessage2);
-                return 1;
-            }
-        }
-        else if (response == 'n') {
-            fprintf(stdout, "Action aborted.\n");
-            return 1;
-        }
-        else {
-            fprintf(stderr, "Response not recognised.\n");
-            return 1;
-        }
-        
+    int rc = 1;
+    float total_hrs = 0.0;
+    float added_hrs = 0.0;
+    time_t time = 0;
+    sqlite3_stmt *stmt = NULL;
+    struct tm* tm_info = NULL;
+    char date_str[17]; // e.g. 'Sun 20 Jul 2025' + null
+    char time_str[6];  // e.g. '11:24' + null
+    char* error_msg = NULL;
+    const char* select_last_cmd = NULL;
+    const char* delete_last_cmd = NULL;
+
+    if (argc != 2)
+    {
+        USR_DEBUG("mattime show: too many arguments.\n"
+                  "Try 'mattime --help' for more information.\n");
+
+        goto cleanup;
     }
 
-    else {
-        fprintf(stderr, "mattime undo: too many arguments\nTry 'mattime --help' for more information.\n");
-        return 1;
+    /* Obtain the latest entry. */
+
+    select_last_cmd = "SELECT * FROM Sessions "
+        "WHERE ROWID = (SELECT MAX(ROWID) FROM Sessions) LIMIT 1;";
+
+    rc = sqlite3_prepare_v2(db, select_last_cmd, -1, &stmt, NULL);
+    if (rc != SQLITE_OK)
+    {
+        LOG_ERROR("call to sqlite3_prepare_v2 with:\n"
+            " * cmd: %s\n" 
+            "failed with error message: %s\n",
+            select_last_cmd, sqlite3_errmsg(db));
+        USR_ERROR("An error occurred preparing the database query.\n");
+
+        goto cleanup;
     }
 
-    return 0;
+    rc = sqlite3_step(stmt);
+    if (rc == SQLITE_ERROR)
+    {
+        LOG_ERROR("sqlite3_step failed with error message: %s\n",
+            sqlite3_errmsg(db));
+        USR_ERROR("An error occurred fetching from the database.\n");
+
+        goto cleanup;
+    }
+    else if (rc != SQLITE_ROW)
+    {
+        /* No rows left to process. */
+
+        USR_DEBUG("No entries to undo.\n");
+        ret = 0;
+
+        goto cleanup;
+    }
+
+    total_hrs = sqlite3_column_double(stmt, 0);
+    added_hrs = sqlite3_column_double(stmt, 1);
+    time = (time_t)sqlite3_column_int(stmt, 2);
+
+    /* Confirm the user wants to proceed. */
+
+    tm_info = localtime(&time);
+
+    strftime(date_str, sizeof(date_str), "%a %d %b %Y", tm_info);
+    strftime(time_str, sizeof(time_str), "%H:%M", tm_info);
+
+    USR_DEBUG("Confirm action: remove the following entry? [y/n]\n"
+            " * added %.2f hours (total %.2f)\n"
+            " * at %s, %s\n",
+            added_hrs, total_hrs, time_str, date_str);
+    
+    rc = usr_confirm();
+    if (rc)
+    {
+        goto cleanup;
+    }
+
+    /* Remove the entry. */
+
+    delete_last_cmd = "DELETE FROM Sessions "
+        "WHERE ROWID = (SELECT MAX(ROWID) FROM Sessions);";
+
+    rc = sqlite3_exec(db, delete_last_cmd, 0, 0, &error_msg);
+    if (rc != SQLITE_OK)
+    {
+        LOG_DEBUG("call to sqlite3_exec with:\n"
+            " * cmd: %s\n" 
+            "returned error message: %s\n",
+            delete_last_cmd, error_msg);
+
+        USR_DEBUG("An error occurred removing the entry from the "
+            "database.\n");
+
+        goto cleanup;
+    }
+
+    /* Success. */
+
+    USR_DEBUG("Removed entry successfully.");
+    ret = 0;
+
+cleanup:
+
+    if (stmt)
+    {
+        sqlite3_finalize(stmt);
+    }
+
+    return ret;
 }
 
-
+#if 0
 int reset(int argc, char* argv[], sqlite3* logs) {
     // Clears all entries from the table
 
