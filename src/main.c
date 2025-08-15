@@ -6,6 +6,7 @@
 #include <sqlite3.h>
 #include <unistd.h>
 #include <errno.h>
+#include <sys/stat.h>
 
 #include "config.h"
 #include "options.h"
@@ -13,7 +14,6 @@
 
 void info();
 void help();
-int  init_db(sqlite3* logs);
 
 static const char* info_msg = 
     "mattime: progress-logging utility.\n" 
@@ -39,63 +39,53 @@ static const char* help_msg =
     "saladdressing@mail.com\n";
 
 /*
-Creates a buffer containing the absolute path of a file by stitching together 
-the path to $HOME and the relative path to the file.
+Concatenates the directory path with the file.
 
  * ARGUMENTS:
-    path: path to file relative from home
+    dir: path to the directory
+    file: filename
 
  * RETURN VALUE:
-    Pointer to the buffer.
+    Pointer to the buffer, or NULL on failure.
 
  * NOTE:
     The buffer is created dynamically. It must be freed by the user before 
     exiting the program.
 */
-static char* get_abs_path(const char* path)
+static char* stitch_path(const char* dir, const char* file)
 {
     char* ret = NULL;
 
     int rc = 1;
     char* buf = NULL;
-    char* home = NULL;
-    size_t buf_len = 0;
-
-    /* Fetch the value of $HOME. */
-
-    home = getenv("HOME");
-    if (!home)
-    {
-        USR_DEBUG("Environment variable $HOME is not set.\n" 
-              "Please set this so that logs can be created in the appropriate "
-              "location.\n");
-
-        goto cleanup;
-    }
+    size_t len = 0;
 
     /* Paste the two parts into a new buffer. */
 
-    buf_len = strlen(home) + 1 + strlen(path);
-    buf = calloc(1, buf_len + 1);
+    len = strlen(dir) + 1 + strlen(file);
+    buf = calloc(1, len + 1);
 
-    rc = snprintf(buf, buf_len + 1, "%s/%s", home, path);
-    if (rc < (int)buf_len)
+    rc = snprintf(buf, len + 1, "%s/%s", dir, file);
+    if (rc < (int)len)
     {
-        /* Catch both errors and early truncation. */
+        /* Catch both errors and early truncation.
 
-        LOG_ERROR("call to snprintf with parameters:\n" 
+        Don't use USR_ERROR as the boilerplate message asks the user to check 
+        the log file, which in this case will not help as it may not yet 
+        exist. */
+
+        USR_DEBUG("call to snprintf with parameters:\n" 
                   " * str (buffer)\n" 
                   " * size: %zu\n" 
-                  " * home (arg): %s\n",
-                  " * path (arg): %s\n",
+                  " * dir (arg): %s\n",
+                  " * file (arg): %s\n",
                   "returned: %d (expected: %d)\n",
-                  buf_len, home, path, rc, buf_len);
-        USR_ERROR("An error occurred creating the path to the log file.\n");
+                  len + 1, dir, file, rc, len);
 
         goto cleanup;
     }
 
-    buf[buf_len] = '\0';
+    buf[len] = '\0';
 
     /* Success. */
 
@@ -112,18 +102,143 @@ cleanup:
 }
 
 /*
+Initialise the directory that will hold application data like the logs and 
+database.
+
+ * RETURN VALUE:
+    Buffer holding the path to the (existing) app data directory, or NULL upon 
+    failure.
+
+ * NOTE:
+    The buffer is created dynamically. It must be freed by the user before 
+    exiting the program.
+*/
+static char* init_app_data_dir()
+{
+    char* ret = NULL;
+
+    int rc = 0;
+    unsigned int len = 0;
+    char* buf = NULL;
+    char* xdg_data_home = NULL;
+    char* home = NULL;
+    char* app_data_dir = NULL;
+    char* mattime_dir = NULL;
+    struct stat st = {0};
+
+    xdg_data_home = getenv("XDG_DATA_HOME");
+    if (XDG_DATA_HOME_OVERRIDE && xdg_data_home)
+    {
+        /* Success - just allocate this dynamically and return. */
+
+        len = strlen(xdg_data_home) + 1;
+
+        errno = 0;
+        buf = malloc(len);
+        if (!buf)
+        {
+            /* No log file available at this point, no choice but to print 
+            errno info to the user. */
+
+            USR_DEBUG("malloc returned errno %d (%s)\n", 
+                errno, strerror(errno));
+
+            goto cleanup;
+        }
+        strncpy(buf, xdg_data_home, len + 1);
+        buf[len - 1] = '\0'; // Double check
+
+        /* Success. */
+
+        ret = buf;
+        buf = NULL;
+
+        goto cleanup;
+    }
+
+    /* Else, take the path from APP_DATA_PATH. */
+
+    home = getenv("HOME");
+    if (!home)
+    {
+        /* Similar situation to before regarding log file, we must report 
+        directly to the user. */
+
+        USR_DEBUG("The environment variable $HOME is not set.\n"
+            "Please set either $HOME or $XDG_DATA_HOME.\n");
+
+        goto cleanup;
+    }
+
+    app_data_dir = stitch_path(home, APP_DATA_PATH);
+    if (!app_data_dir)
+    {
+        goto cleanup;
+    }
+
+    mattime_dir = stitch_path(app_data_dir, "mattime");
+    if (!mattime_dir)
+    {
+        goto cleanup;
+    }
+    
+    /* Create the directory if it doesn't already exist. */
+
+    rc = stat(mattime_dir, &st);
+    if (rc)
+    {
+        errno = 0;
+        rc = mkdir(mattime_dir, 0755); /* In line with other similar dirs. */
+        if (rc)
+        {
+            USR_DEBUG("mkdir failed with errno %d (%s)\n", 
+                errno, strerror(errno));
+
+            goto cleanup;
+        }
+    }
+
+    /* Success. */
+
+    ret = mattime_dir;
+    mattime_dir = NULL;
+
+cleanup:
+    if (buf)
+    {
+        free(buf);
+    }
+    if (app_data_dir)
+    {
+        free(app_data_dir);
+    }
+    if (mattime_dir)
+    {
+        free(mattime_dir);
+    }
+
+    return ret;
+}
+
+/*
 Opens a file descriptor to the log file in the global variable g_log_fp.
 
  * RETURN VALUE:
     Returns 0 upon success, 1 otherwise.
 */
-static int init_log(const char* path)
+static int init_log(const char* app_data_dir)
 {
     int ret = 1;
 
     /* g_log_fp declared in utilities.h. */
 
     /* Creates file if it does not already exist. */
+
+    char* path = stitch_path(app_data_dir, "mattime.log");
+    if (!path)
+    {
+        goto cleanup;
+    }
 
     errno = 0;
     g_log_fp = fopen(path, "a");
@@ -137,35 +252,64 @@ static int init_log(const char* path)
 
         USR_DEBUG("An error occurred initialising the log file: "
             "errno %d (%s)\n", errno, strerror(errno));
-        goto exit;
+        goto cleanup;
     }
 
     /* Success, g_log_fp is set. */
 
     ret = 0;
 
-exit:
+cleanup:
+    if (path)
+    {
+        free(path);
+    }
+
     return ret;
 }
 
 /*
-Ensure that the Sessions table is created in the database, if not already.
+Initialise the database and the Sessions table.
 
  * ARGUMENTS:
     db: ptr to a sqlite3 object
 
  * RETURN VALUE:
-    Returns 0 upon success, 1 otherwise.
+    Returns a pointer to the sqlite3 database object, or NULL upon failure.
 */
-static int init_table(sqlite3* db)
+static sqlite3* init_db(const char* app_data_dir)
 {
-    int ret = 1;
+    sqlite3* ret = NULL;
 
     int rc = 1;
-    const char* cmd = "CREATE TABLE IF NOT EXISTS "
-                      "Sessions(TotalHours FLOAT, HoursAdded FLOAT, "
-                      "Time BIGINT);";
+    char* db_path = NULL;
     char* error_msg = NULL;
+    const char* cmd = NULL;
+    sqlite3* db = NULL;
+
+    /* Open the database, creating a new one if it doesn't already exist. */
+
+    db_path = stitch_path(app_data_dir, "mattime.db");
+    if (!db_path)
+    {
+        goto cleanup;
+    }
+
+    rc = sqlite3_open(db_path, &db);
+    if (rc != SQLITE_OK)
+    {
+        LOG_ERROR("cannot open database.\n"
+                  "Error: %s\n", sqlite3_errmsg(db));
+        USR_ERROR("An error occurred opening the database.\n");
+
+        goto cleanup;
+    }
+
+    /* Initialise the Sessions table. */
+
+    cmd = "CREATE TABLE IF NOT EXISTS "
+        "Sessions(TotalHours FLOAT, HoursAdded FLOAT, "
+        "Time BIGINT);";
 
     rc = sqlite3_exec(db, cmd, 0, 0, &error_msg);
     if (rc != SQLITE_OK)
@@ -173,18 +317,26 @@ static int init_table(sqlite3* db)
         LOG_ERROR("Creating table failed.\n SQL error: %s\n", error_msg);
         USR_ERROR("Failed to initialise the database.\n");
 
-        ret = 1;
         goto cleanup;
     }
     
     /* Success. */
 
-    ret = 0;
+    ret = db;
+    db = NULL;
 
 cleanup:
+    if (db_path)
+    {
+        free(db_path);
+    }
     if (error_msg)
     {
         sqlite3_free(error_msg);
+    }
+    if (db)
+    {
+        sqlite3_close(db);
     }
 
     return ret;
@@ -225,21 +377,24 @@ int main(int argc, char* argv[])
     int ret = 1;
 
     int rc = 1;
-    char* db_path = NULL;
-    char* log_path = NULL;
+    char* app_data_dir = NULL;
     sqlite3* db = NULL;
+
+    /*
+    Set the app data directory (location to store logs, database etc.)
+    */
+
+    app_data_dir = init_app_data_dir();
+    if (!app_data_dir)
+    {
+        goto cleanup;
+    }
 
     /*
     Initialise the log file.
     */
 
-    log_path = get_abs_path(LOGFILE_PATH);
-    if (!log_path)
-    {
-        goto cleanup;
-    }
-
-    rc = init_log(log_path);
+    rc = init_log(app_data_dir);
     if (rc)
     {
         goto cleanup;
@@ -249,24 +404,8 @@ int main(int argc, char* argv[])
     Initialise the database.
     */
 
-    db_path = get_abs_path(DATABASE_PATH);
-    if (!db_path)
-    {
-        goto cleanup;
-    }
-
-    rc = sqlite3_open(db_path, &db);
-    if (rc != SQLITE_OK)
-    {
-        LOG_ERROR("cannot open database.\n"
-                  "Error: %s\n", sqlite3_errmsg(db));
-        USR_ERROR("An error occurred opening the database.\n");
-
-        goto cleanup;
-    }
-
-    rc = init_table(db);
-    if (rc)
+    db = init_db(app_data_dir);
+    if (!db)
     {
         goto cleanup;
     }
@@ -313,12 +452,12 @@ int main(int argc, char* argv[])
     {
         ret = undo(argc, db);
     }
-#if 0
+
     else if (!strcmp(argv[1], "reset") || !strcmp(argv[1], "-r"))
     {
-        ret = reset(argc, argv, db);
+        ret = reset(argc, db);
     }
-#endif
+
     else
     {
         USR_DEBUG("mattime: option not recognised.\n");
@@ -327,13 +466,9 @@ int main(int argc, char* argv[])
 
 cleanup:
 
-    if (db_path)
+    if (app_data_dir)
     {
-        free(db_path);
-    }
-    if (log_path)
-    {
-        free(log_path);
+        free(app_data_dir);
     }
     if (db)
     {

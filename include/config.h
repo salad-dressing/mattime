@@ -5,7 +5,7 @@ the database from becoming bloated.
 When the cap is reached, entries are deleted one-by-one, starting with the 
 oldest.
 */
-#define MAX_LOG_ENTRIES                                   20
+#define MAX_LOG_ENTRIES                                  200
 
 /*
 The default maximum number of entries to display when calling 'mattime show'.
@@ -13,20 +13,22 @@ The default maximum number of entries to display when calling 'mattime show'.
 #define ENTRIES_TO_SHOW                                   10
 
 /*
-Path to write debug/error logs to. Relative to $HOME.
+The user's standard directory used to store app data. Path is relative to 
+$HOME.
 
-If this is changed, you will have to manually move the file to the new 
-destination, otherwise a new file will be created.
+A `mattime/` directory will be created within this to store the database and 
+log file.
+
+By default this location is `~/.local/share/`, so e.g. the database would be 
+stored at `~/.local/share/mattime/mattime.db`.
 */
-#define LOGFILE_PATH      ".local/share/mattime/mattime.log"
+#define APP_DATA_PATH                        ".local/share/"
 
 /*
-Path to the mattime database. Relative to $HOME.
-
-If this is changed, you will have to manually move the file to the new 
-destination, otherwise a new file will be created.
+If this is set to 1, the above (APP_DATA_PATH) will be overridden by the 
+$XDG_DATA_HOME environment variable if it is set.
 */
-#define DATABASE_PATH      ".local/share/mattime/mattime.db"
+#define XDG_DATA_HOME_OVERRIDE                             1
 
 /*
 Set to 1 to have the most recent entries at the top, e.g.:

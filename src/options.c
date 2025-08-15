@@ -370,12 +370,12 @@ int add(int argc, char* argv[], sqlite3* db)
         if (((int)prev_total_hrs % 100) > ((int)new_total_hrs % 100))
         {
             milestone = 100;
-            congrats_msg = "Congratulations, you passed a multiple of 100!\n";
+            congrats_msg = "Congratulations, you passed a multiple of 100!";
         }
         else if (((int)prev_total_hrs % 50) > ((int)new_total_hrs % 50))
         {
             milestone = 50;
-            congrats_msg = "Congratulations, you passed a multiple of 50!\n";
+            congrats_msg = "Congratulations, you passed a multiple of 50!";
         }
     }
 
@@ -947,7 +947,7 @@ int undo(int argc, sqlite3* db)
 
     USR_DEBUG("Confirm action: remove the following entry? [y/n]\n"
             " * added %.2f hours (total %.2f)\n"
-            " * at %s, %s\n",
+            " * at %s, %s",
             added_hrs, total_hrs, time_str, date_str);
     
     rc = usr_confirm();
@@ -986,50 +986,78 @@ cleanup:
     {
         sqlite3_finalize(stmt);
     }
+    if (error_msg)
+    {
+        sqlite3_free(error_msg);
+    }
 
     return ret;
 }
 
-#if 0
-int reset(int argc, char* argv[], sqlite3* logs) {
-    // Clears all entries from the table
+/*
+Removes all entries from the database.
 
-    char* resetCommand = "DELETE FROM Sessions;";
-    char* errorMessage;
+ * ARGUMENTS:
+    argc
+    db: pointer to the SQL database object
 
-    fprintf(stdout, "Confirm action: delete all entries and reset?\n(Type y/n)\n");
-    char response = '0'; scanf("%c", &response);
+ * RETURN VALUE:
+    Returns 0 if success, 1 otherwise.
+*/
+int reset(int argc, sqlite3* db)
+{
+    int ret = 1;
 
-    if (response == 'y') {
-        getchar();
-        fprintf(stdout, "\nWARNING: This action is permanent and cannot be undone. Continue to delete all entries?\n(Type y/n)\n");
-        char confirmation = '0'; scanf("%c", &confirmation);
-        if (confirmation == 'y') {
-            if (sqlite3_exec(logs, resetCommand, 0, 0, &errorMessage) == SQLITE_OK) {
-                fprintf(stdout, "Successfully deleted all entries.\n");
-                return 0;
-            }
-            else {
-                fprintf(stderr, "Deleting all entries failed!\nSQL error: %s\n", errorMessage);
-                return 1;
-            }
-        } else if (confirmation == 'n') {
-            fprintf(stdout, "Action aborted.\n");
-            return 1;
-        } else {
-            fprintf(stderr, "Response not recognised. Aborting...\n");
-            return 1;
-        }
+    int rc = 1;
+    char* error_msg = NULL;
+    const char* reset_cmd = "DELETE FROM Sessions;";
+    
+    if (argc != 2)
+    {
+        USR_DEBUG("mattime show: too many arguments.\n"
+                  "Try 'mattime --help' for more information.\n");
+
+        goto cleanup;
     }
 
-    else if (response == 'n') {
-        fprintf(stdout, "Action aborted.\n");
-        return 1;
+    /* Confirm action with the user. */
+    
+    USR_DEBUG("Confirm action: delete all entries from the database? [y/n]\n"
+        "WARNING: this action is permanent.");
+    
+    rc = usr_confirm();
+    if (rc)
+    {
+        goto cleanup;
     }
 
-    else {
-        fprintf(stderr, "Response not recognised. Aborting...\n");
-        return 1;
+    /* Delete all entries. */
+
+    rc = sqlite3_exec(db, reset_cmd, 0, 0, &error_msg);
+    if (rc != SQLITE_OK)
+    {
+        LOG_DEBUG("call to sqlite3_exec with:\n"
+            " * cmd: %s\n" 
+            "returned error message: %s\n",
+            reset_cmd, error_msg);
+
+        USR_DEBUG("An error occurred removing the entry from the "
+            "database.\n");
+
+        goto cleanup;
     }
+
+    /* Success. */
+
+    USR_DEBUG("Reset database successfully.");
+    ret = 0;
+
+cleanup:
+
+    if (error_msg)
+    {
+        sqlite3_free(error_msg);
+    }
+
+    return ret;
 }
-#endif

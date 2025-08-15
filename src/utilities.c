@@ -36,8 +36,7 @@ void usr_print(unsigned int error, const char* format, ...)
 
         fprintf(USR_ERROR_FD, "[!] ");
         vfprintf(USR_ERROR_FD, format, args);
-        fprintf(USR_ERROR_FD, "Please check the log at ~/%s for more "
-            "details.\n", LOGFILE_PATH);
+        fprintf(USR_ERROR_FD, "Please check the logs for more details.\n");
         fprintf(USR_ERROR_FD, "\n");
     }
     else
