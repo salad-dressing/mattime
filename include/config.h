@@ -5,7 +5,7 @@ the database from becoming bloated.
 When the cap is reached, entries are deleted one-by-one, starting with the 
 oldest.
 */
-#define MAX_LOG_ENTRIES                                  200
+#define MAX_LOG_ENTRIES                                 1000
 
 /*
 The default maximum number of entries to display when calling 'mattime show'.

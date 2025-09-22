@@ -1,6 +1,6 @@
 # mattime
 
-mattime: a lightweight CLI utility to log your hours of progress
+mattime: a lightweight CLI utility to log hours of progress
 
 ## Installation
 
@@ -41,15 +41,14 @@ Examples:
 
 ## Configuration
 
-`mattime` aims to be highly customisable via `include/config.h`. After making 
-any changes, `mattime` can be easily rebuilt and reinstalled by following the 
+`mattime` aims to be customisable via `include/config.h`. After making any 
+changes, `mattime` can be easily rebuilt and reinstalled by following the 
 instructions from before.
 
-### Developers
+## Developers
 
-Developers can choose to create a debug build of `mattime`, enabling compiler 
-warnings. This can be done by specifying the `CMAKE_BUILD_TYPE` flag as 
-follows:
+Developers can create a debug build of `mattime`, enabling compiler warnings. 
+This can be done by specifying the `CMAKE_BUILD_TYPE` flag as follows:
 
 ``` bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
@@ -57,6 +56,6 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 
 The install step is then the same as in Release mode.
 
-### Feedback
+## Feedback
 
 For feedback or issues, please report to the developer: saladdressing@mail.com

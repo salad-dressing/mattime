@@ -1,4 +1,5 @@
 //#include <math.h>
+#include <bits/types/time_t.h>
 #include <time.h>
 #include <stdio.h>
 #include <string.h>
@@ -265,6 +266,9 @@ int add(int argc, char* argv[], sqlite3* db)
     const char* query_total_cmd = NULL;
     const char* congrats_msg = NULL;
     sqlite3_stmt *add_stmt = NULL;
+    struct tm* tm_info = NULL;
+    char date_str[17]; // e.g. 'Sun 20 Jul 2025' + null
+    char time_str[6];  // e.g. '11:24' + null
 
     if (argc == 2)
     {
@@ -441,11 +445,16 @@ int add(int argc, char* argv[], sqlite3* db)
 
     /* Success. */
 
+    tm_info = localtime(&sec);
+
+    strftime(date_str, sizeof(date_str), "%a %d %b %Y", tm_info);
+    strftime(time_str, sizeof(time_str), "%H:%M", tm_info);
+
     LOG_DEBUG("added entry:\n" 
         " * TotalHours: %.2f\n"
         " * HoursAdded: %.2f\n"
-        " * Time: %lu\n",
-        new_total_hrs, added_hrs, (unsigned long)sec);
+        " * Time: %s, %s\n",
+        new_total_hrs, added_hrs, time_str, date_str);
 
     USR_DEBUG("Successfully added %.2f hours.\n", added_hrs);
 
@@ -513,13 +522,20 @@ int total(int argc, sqlite3* db)
     }
 
     rc = sqlite3_step(stmt);
-    if (rc != SQLITE_ROW)
+    if (rc == SQLITE_ERROR)
     {
-        /* Should have retrieved a single row. */
-
         LOG_ERROR("sqlite3_step failed with error message: %s\n",
             sqlite3_errmsg(db));
         USR_ERROR("An error occurred fetching from the database.\n");
+
+        goto cleanup;
+    }
+    else if (rc != SQLITE_ROW)
+    {
+        /* Empty database. Safely exit. */
+
+        USR_DEBUG("Total hours: 0.00 (no entries)\n");
+        ret = 0;
 
         goto cleanup;
     }
@@ -538,10 +554,10 @@ int total(int argc, sqlite3* db)
     strftime(date_str, sizeof(date_str), "%a %d %b %Y", tm_info);
     strftime(time_str, sizeof(time_str), "%H:%M", tm_info);
 
-    fprintf(stdout, "Total hours: %0.1f\n", total_hrs);
-    fprintf(stdout, "Last updated: %s %s\n", date_str, time_str);
-    
     /* Success. */
+
+    fprintf(stdout, "Total hours: %.2f\n", total_hrs);
+    fprintf(stdout, "Last updated: %s %s\n", date_str, time_str);
 
     ret = 0;
 
@@ -736,6 +752,9 @@ int force(int argc, char* argv[], sqlite3* db)
     char* cmd = NULL;
     char* error_msg = NULL;
     const char* cmd_tmp = NULL;
+    struct tm* tm_info = NULL;
+    char date_str[17]; // e.g. 'Sun 20 Jul 2025' + null
+    char time_str[6];  // e.g. '11:24' + null
 
     if (argc == 2)
     {
@@ -848,6 +867,17 @@ int force(int argc, char* argv[], sqlite3* db)
     }
 
     /* Success. */
+
+    tm_info = localtime(&sec);
+
+    strftime(date_str, sizeof(date_str), "%a %d %b %Y", tm_info);
+    strftime(time_str, sizeof(time_str), "%H:%M", tm_info);
+
+    LOG_DEBUG("forced total:\n" 
+        " * TotalHours: %.2f\n"
+        " * HoursAdded: 0\n"
+        " * Time: %s, %s\n",
+        new_hrs, time_str, date_str);
 
     USR_DEBUG("Success: set total hours to %.2f.\n", new_hrs);
     ret = 0;
@@ -977,6 +1007,12 @@ int undo(int argc, sqlite3* db)
 
     /* Success. */
 
+    LOG_DEBUG("removed entry:\n" 
+        " * TotalHours: %.2f\n"
+        " * HoursAdded: %.2f\n"
+        " * Time: %s, %s\n",
+        total_hrs, added_hrs, time_str, date_str);
+
     USR_DEBUG("Removed entry successfully.");
     ret = 0;
 
@@ -1011,6 +1047,10 @@ int reset(int argc, sqlite3* db)
     int rc = 1;
     char* error_msg = NULL;
     const char* reset_cmd = "DELETE FROM Sessions;";
+    time_t sec = 0;
+    struct tm* tm_info = NULL;
+    char date_str[17]; // e.g. 'Sun 20 Jul 2025' + null
+    char time_str[6];  // e.g. '11:24' + null
     
     if (argc != 2)
     {
@@ -1048,6 +1088,16 @@ int reset(int argc, sqlite3* db)
     }
 
     /* Success. */
+
+    sec = time(NULL);
+    tm_info = localtime(&sec);
+
+    strftime(date_str, sizeof(date_str), "%a %d %b %Y", tm_info);
+    strftime(time_str, sizeof(time_str), "%H:%M", tm_info);
+
+    LOG_DEBUG("reset database at:\n" 
+        " * Time: %s, %s\n",
+        time_str, date_str);
 
     USR_DEBUG("Reset database successfully.");
     ret = 0;

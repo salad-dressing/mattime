@@ -470,6 +470,10 @@ cleanup:
     {
         free(app_data_dir);
     }
+    if (g_log_fp)
+    {
+        fclose(g_log_fp);
+    }
     if (db)
     {
         sqlite3_close(db);
